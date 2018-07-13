@@ -4,7 +4,6 @@ setup(name='tap-redash',
       version='0.0.1',
       description='Singer.io tap for extracting data from the Redash API',
       author='domb16',
-      url='http://singer.io',
       classifiers=['Programming Language :: Python :: 3 :: Only'],
       py_modules=['tap-redash'],
       install_requires=[
