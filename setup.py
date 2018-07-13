@@ -5,7 +5,7 @@ setup(name='tap-redash',
       description='Singer.io tap for extracting data from the Redash API',
       author='domb16',
       classifiers=['Programming Language :: Python :: 3 :: Only'],
-      py_modules=['tap-redash'],
+      py_modules=['tap_redash'],
       install_requires=[
           'singer-python>=2.1.4',
           'requests>=2.13.0',
@@ -16,9 +16,9 @@ setup(name='tap-redash',
           [console_scripts]
           tap-redash=tap_redash:main
       ''',
-      packages=['./tap-redash'],
+      packages=['tap_redash'],
       package_data={
-          'tap_redash/': ['tap_redash/*.json']
+          'tap-redash/': ['tap_redash/*.json']
       },
       include_package_data=True
 )
