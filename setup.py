@@ -16,9 +16,5 @@ setup(name='tap-redash',
           [console_scripts]
           tap-redash=tap_redash:main
       ''',
-      packages=['tap_redash'],
-      package_data={
-          'tap-redash/': ['tap_redash/*.json']
-      },
-      include_package_data=True
-)
+      )
+
