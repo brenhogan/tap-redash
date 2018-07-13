@@ -9,13 +9,17 @@ logger = singer.get_logger()
 
 class Redash:
     # add a check for when json is read in to make sure all RCKs are inc.
-    REQUIRED_CONFIG_KEYS = ['QUERY_URL', 'LOGIN_URL', 'email', 'password', 'API_KEY']
+    REQUIRED_CONFIG_KEYS = ['QUERY_URL', 'LOGIN_URL', 'email', 'password', 'API_KEY', 'QUERY_ID']
 
-    def __init__(self, query_id):
-        with open('config.json') as data:
-            self.__config = json.load(data)
+    def __init__(self):
+        try:
+            # make it so this can be ran with any name as long as its after -c
+            with open('config.json') as data:
+                self.__config = json.load(data)
+        except Exception as e:
+            raise IOError("File was not found: ", e)
         self.auth()
-        self.query_id = query_id
+        self.query_id = self.__config['QUERY_ID']
         self.__data = self.get_query_data(self.query_id)
         self.col_types, self.col_names = [], []
 
@@ -116,8 +120,8 @@ class Redash:
 
 
 def main():
-    rdash = Redash(25)
-    args = singer.utils.parse_args(rdash.REQUIRED_CONFIG_KEYS)
+    rdash = Redash()
+    args = singer.utils.parse_args(rdash.REQUIRED_CONFIG_KEYS )
     if args.discover:
         rdash.do_discover()
     else:
