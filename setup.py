@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(name='tap-redash',
       version='0.0.1',
@@ -6,7 +6,7 @@ setup(name='tap-redash',
       author='domb16',
       url='http://singer.io',
       classifiers=['Programming Language :: Python :: 3 :: Only'],
-      py_modules=['tap_redash'],
+      py_modules=['tap-redash'],
       install_requires=[
           'singer-python>=2.1.4',
           'requests>=2.13.0',
@@ -17,9 +17,9 @@ setup(name='tap-redash',
           [console_scripts]
           tap-redash=tap_redash:main
       ''',
-      packages=['tap_redash'],
+      packages=['tap-redash'],
       package_data={
           'tap_redash/': ['tap_redash/*.json']
       },
       include_package_data=True
-      )
+)
