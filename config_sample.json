@@ -1,0 +1,8 @@
+{
+  "QUERY_URL" : "https://reports.replace-with-org-name.com/api/queries",
+  "LOGIN_URL" :"https://reports.replace-with-org-name.com/login",
+  "email" : "replace-with-redash-email",
+  "password" : "replace-with-redash-pass",
+  "API_KEY" : " your API-KEY",
+  "disable_collection": true
+}
