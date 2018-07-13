@@ -9,7 +9,8 @@ setup(name='tap-redash',
       install_requires=[
           'singer-python>=2.1.4',
           'requests>=2.13.0',
-          'pylint'
+          'pylint',
+          'pandas'
 
       ],
       entry_points='''
