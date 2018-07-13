@@ -1,0 +1,30 @@
+{
+  "stream": "query_id",
+  "stream_id": "query_id",
+  "schema": {
+    "type ": [
+      "null",
+      "object"
+    ],
+    "additionalProperties": false,
+    "properties": [
+      {
+        "Sample_field_0": {
+          "type": [
+            "null",
+            "string"
+          ]
+        }
+      },
+      {
+        "Sample_field_1": {
+          "type": [
+            "null",
+            "number"
+          ]
+        }
+      }
+    ]
+  },
+  "key_properties": []
+}
