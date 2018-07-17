@@ -1,4 +1,5 @@
 {
+  "QUERY_ID": "replace-with-queriedID"
   "QUERY_URL" : "https://reports.replace-with-org-name.com/api/queries",
   "LOGIN_URL" :"https://reports.replace-with-org-name.com/login",
   "email" : "replace-with-redash-email",
