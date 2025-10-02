@@ -1,19 +1,77 @@
 # tap-redash
-Singer.IO tap to obtain data using the Redash API based on the query's ID
 
+A [Singer](https://singer.io) tap for extracting data from [Redash](https://redash.io).
 
-## Set up
+## Installation
 
-Run terminal command:
+```bash
+pip install singer-python requests
+```
 
-`pip install -e git+https://github.com/domb16/tap-redash.git#egg=tap-redash`
+## Quick Start
 
-Run `tap-redash` this should give you an error since it requires a config file the structure can be found in [config_sample.json](./config_sample.json)
+Create `config.json`:
+```json
+{
+  "BASE_URL": "https://redash.example.com",
+  "API_KEY": "your-api-key-here"
+}
+```
 
-### Discover mode
+Discover and sync:
+```bash
+# Discover all queries
+python tap_redash.py --config config.json --discover > catalog.json
 
-Run the tap in discover mode `tap-redash -c config.json -d > location/schema_query.json`
+# Sync to target
+python tap_redash.py --config config.json --catalog catalog.json | target-jsonl
+```
 
-Read the schema in to get the data with it using: `tap-redash -c config.json -p location/schema_query.json`
+## Configuration
 
-Can be piped to any other target from the [Singer.io](https://singer.io)
+### Required
+- `BASE_URL` - Your Redash instance URL
+- `API_KEY` - Your Redash API key
+
+### Optional
+- `QUERY_ID` - Sync only a specific query (omit to sync all queries)
+- `key_properties` - Array of primary key column names
+
+## Usage
+
+### Sync all queries
+```bash
+python tap_redash.py --config config.json --catalog catalog.json
+```
+
+### Sync specific query
+Add `"QUERY_ID": "123"` to your config, then run without catalog:
+```bash
+python tap_redash.py --config config.json
+```
+
+### Stream selection
+Edit `catalog.json` and set `"selected": false` for streams you want to skip.
+
+## Features
+
+- Automatically discovers all queries in your Redash instance
+- Infers schemas from query results
+- Supports stream selection via Singer catalog
+- Handles individual query failures gracefully
+- Sanitizes query names into valid stream identifiers
+
+## Authentication
+
+Get your API key from your Redash user settings. The key needs permission to list queries and view results.
+
+## Limitations
+
+- Full table replication only (no incremental sync)
+- No support for parameterized queries
+- Entire result sets loaded into memory
+
+## Resources
+
+- [Singer Specification](https://github.com/singer-io/getting-started/blob/master/docs/SPEC.md)
+- [Redash API Documentation](https://redash.io/help/user-guide/integrations-and-api)
