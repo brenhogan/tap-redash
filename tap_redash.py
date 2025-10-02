@@ -5,7 +5,11 @@ from typing import Any, Dict, List
 import requests as req
 import singer
 
+# Configure logging: WARNING+ only
 logger = singer.get_logger()
+logger.setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("requests").setLevel(logging.WARNING)
 
 # Require only BASE_URL (Redash base), API_KEY, QUERY_ID
 REQUIRED_CONFIG_KEYS = ['BASE_URL', 'API_KEY', 'QUERY_ID']
@@ -18,7 +22,7 @@ class Redash:
     - Auth via API key only.
     - Requires only BASE_URL, API_KEY, QUERY_ID.
     - Generates a Singer schema by scanning sample rows.
-    - --discover prints a simplified wrapper: { "stream": ..., "schema": ..., "key_properties": [...] }
+    - --discover prints a proper Singer catalog with "streams".
     - No STATE/incremental support by design.
     """
 
@@ -37,7 +41,6 @@ class Redash:
     # -------- Fetch Query Data -------- #
 
     def _get_query_data(self, query_id: str) -> List[Dict[str, Any]]:
-        """Fetch results for the given Redash query as a list of row dicts."""
         base = self._config['BASE_URL'].rstrip('/')
         url = f"{base}/api/queries/{query_id}/results.json"
         params = {'api_key': self._config['API_KEY']}
@@ -60,19 +63,17 @@ class Redash:
             logger.critical("Unexpected Redash payload shape: %s", e)
             raise
 
-        logger.info("Fetched %d rows from Redash query %s.", len(rows), query_id)
         return rows
 
     # -------- Schema Inference -------- #
 
     @staticmethod
     def _singer_type_for_value(value: Any) -> str:
-        """Map a Python value to a Singer JSON Schema primitive type (excluding 'null')."""
         if value is None:
             return None
         if isinstance(value, bool):
             return "boolean"
-        if isinstance(value, int) or isinstance(value, float):
+        if isinstance(value, (int, float)):
             return "number"
         if isinstance(value, str):
             return "string"
@@ -83,7 +84,6 @@ class Redash:
         return "string"
 
     def _infer_properties(self, sample_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Build Singer 'properties' by scanning up to N rows and forming a union type for each field."""
         MAX_SCAN = min(100, len(sample_rows))
         union: Dict[str, set] = {}
 
@@ -105,8 +105,8 @@ class Redash:
 
         return properties
 
-    def generate_schema_wrapper(self) -> Dict[str, Any]:
-        """Return a simplified Singer schema wrapper for this stream."""
+    def generate_stream_entry(self) -> Dict[str, Any]:
+        """Return one stream entry for the Singer catalog."""
         if not self._data:
             properties: Dict[str, Any] = {}
         else:
@@ -116,8 +116,9 @@ class Redash:
         if not isinstance(key_props, list):
             key_props = []
 
-        wrapper: Dict[str, Any] = {
+        stream_entry: Dict[str, Any] = {
             "stream": self.query_id,
+            "tap_stream_id": self.query_id,
             "schema": {
                 "type": "object",
                 "properties": properties,
@@ -125,25 +126,31 @@ class Redash:
             },
             "key_properties": key_props,
         }
-        return wrapper
+        return stream_entry
 
     # -------- Singer IO -------- #
 
     def do_discover(self) -> Dict[str, Any]:
-        """Discovery mode prints the simplified schema wrapper and returns it."""
-        wrapper = self.generate_schema_wrapper()
-        print(json.dumps(wrapper, indent=2))
-        return wrapper
+        """Discovery mode prints the proper Singer catalog."""
+        catalog = {"streams": [self.generate_stream_entry()]}
+        print(json.dumps(catalog, indent=2))
+        return catalog
 
-    def output_to_stream(self, stream_name: str, schema_wrapper: Dict[str, Any]) -> None:
+    def output_to_stream(self, schema_wrapper: Dict[str, Any]) -> None:
         """Emit schema and records to stdout in Singer format."""
-        schema = schema_wrapper["schema"]
-        key_props = schema_wrapper.get("key_properties", [])
-        singer.write_schema(stream_name, schema, key_props)
+        # schema_wrapper here should be the full catalog ({"streams": [...]})
 
-        # Emit all records in one call to ensure they are written to stdout
-        if self._data:
-            singer.write_records(stream_name, self._data)
+        if not schema_wrapper or "streams" not in schema_wrapper:
+            logger.critical("Invalid schema wrapper; no streams found.")
+            return
+
+        for stream in schema_wrapper["streams"]:
+            stream_name = stream["stream"]
+            schema = stream["schema"]
+            key_props = stream.get("key_properties", [])
+            singer.write_schema(stream_name, schema, key_props)
+            if self._data:
+                singer.write_records(stream_name, self._data)
 
 
 def main() -> None:
@@ -153,15 +160,13 @@ def main() -> None:
         rdash.do_discover()
         return
 
-    schema_wrapper = args.properties if args.properties else rdash.generate_schema_wrapper()
+    schema_wrapper = args.properties if args.properties else {"streams": [rdash.generate_stream_entry()]}
 
-    if not isinstance(schema_wrapper, dict) or "stream" not in schema_wrapper or "schema" not in schema_wrapper:
+    if not isinstance(schema_wrapper, dict) or "streams" not in schema_wrapper:
         logger.warning("Invalid or missing properties provided; regenerating schema.")
-        schema_wrapper = rdash.generate_schema_wrapper()
+        schema_wrapper = {"streams": [rdash.generate_stream_entry()]}
 
-    rdash.output_to_stream(schema_wrapper["stream"], schema_wrapper)
-
-    # Ensure everything is flushed to stdout for downstream targets
+    rdash.output_to_stream(schema_wrapper)
     sys.stdout.flush()
 
 
