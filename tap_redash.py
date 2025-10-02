@@ -1,16 +1,26 @@
 import logging
 import json
+import sys
 from typing import Any, Dict, List
 import requests as req
 import singer
 
 logger = singer.get_logger()
 
+# Require only BASE_URL (Redash base), API_KEY, QUERY_ID
 REQUIRED_CONFIG_KEYS = ['BASE_URL', 'API_KEY', 'QUERY_ID']
 args = singer.utils.parse_args(REQUIRED_CONFIG_KEYS)
 
 
 class Redash:
+    """
+    Minimal Singer tap for fetching a single Redash query result using API key auth.
+    - Auth via API key only.
+    - Requires only BASE_URL, API_KEY, QUERY_ID.
+    - Generates a Singer schema by scanning sample rows.
+    - --discover prints a simplified wrapper: { "stream": ..., "schema": ..., "key_properties": [...] }
+    - No STATE/incremental support by design.
+    """
 
     def __init__(self) -> None:
         try:
@@ -57,6 +67,7 @@ class Redash:
 
     @staticmethod
     def _singer_type_for_value(value: Any) -> str:
+        """Map a Python value to a Singer JSON Schema primitive type (excluding 'null')."""
         if value is None:
             return None
         if isinstance(value, bool):
@@ -72,6 +83,7 @@ class Redash:
         return "string"
 
     def _infer_properties(self, sample_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Build Singer 'properties' by scanning up to N rows and forming a union type for each field."""
         MAX_SCAN = min(100, len(sample_rows))
         union: Dict[str, set] = {}
 
@@ -94,6 +106,7 @@ class Redash:
         return properties
 
     def generate_schema_wrapper(self) -> Dict[str, Any]:
+        """Return a simplified Singer schema wrapper for this stream."""
         if not self._data:
             properties: Dict[str, Any] = {}
         else:
@@ -117,17 +130,20 @@ class Redash:
     # -------- Singer IO -------- #
 
     def do_discover(self) -> Dict[str, Any]:
+        """Discovery mode prints the simplified schema wrapper and returns it."""
         wrapper = self.generate_schema_wrapper()
         print(json.dumps(wrapper, indent=2))
         return wrapper
 
     def output_to_stream(self, stream_name: str, schema_wrapper: Dict[str, Any]) -> None:
+        """Emit schema and records to stdout in Singer format."""
         schema = schema_wrapper["schema"]
         key_props = schema_wrapper.get("key_properties", [])
         singer.write_schema(stream_name, schema, key_props)
 
-        for row in self._data:
-            singer.write_records(stream_name, [row])
+        # Emit all records in one call to ensure they are written to stdout
+        if self._data:
+            singer.write_records(stream_name, self._data)
 
 
 def main() -> None:
@@ -144,6 +160,9 @@ def main() -> None:
         schema_wrapper = rdash.generate_schema_wrapper()
 
     rdash.output_to_stream(schema_wrapper["stream"], schema_wrapper)
+
+    # Ensure everything is flushed to stdout for downstream targets
+    sys.stdout.flush()
 
 
 if __name__ == "__main__":
