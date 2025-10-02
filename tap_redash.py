@@ -116,6 +116,26 @@ class Redash:
         if not isinstance(key_props, list):
             key_props = []
 
+        # Build Singer metadata: one root and one per property
+        metadata_entries: List[Dict[str, Any]] = []
+        # Root-level metadata
+        metadata_entries.append({
+            "breadcrumb": [],
+            "metadata": {
+                "selected-by-default": True,
+                "inclusion": "available",
+            },
+        })
+        # Per-field metadata
+        for field_name in properties.keys():
+            metadata_entries.append({
+                "breadcrumb": ["properties", field_name],
+                "metadata": {
+                    "selected": True,
+                    "inclusion": "available",
+                },
+            })
+
         stream_entry: Dict[str, Any] = {
             "stream": self.query_id,
             "tap_stream_id": self.query_id,
@@ -125,6 +145,7 @@ class Redash:
                 "additionalProperties": False,
             },
             "key_properties": key_props,
+            "metadata": metadata_entries,
         }
         return stream_entry
 
