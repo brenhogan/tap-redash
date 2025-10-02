@@ -1,137 +1,149 @@
 import logging
-import requests as req
 import json
+from typing import Any, Dict, List
+import requests as req
 import singer
 
 logger = singer.get_logger()
-# add a check for when json is read in to make sure all RCKs are inc.
-REQUIRED_CONFIG_KEYS = ['QUERY_URL', 'LOGIN_URL', 'email', 'password', 'API_KEY', 'QUERY_ID']
+
+REQUIRED_CONFIG_KEYS = ['BASE_URL', 'API_KEY', 'QUERY_ID']
 args = singer.utils.parse_args(REQUIRED_CONFIG_KEYS)
 
 
 class Redash:
 
-    def __init__(self):
+    def __init__(self) -> None:
         try:
-            # make it so this can be ran with any name as long as its after -c
-            self.__config = args.config
+            self._config: Dict[str, Any] = args.config
         except Exception as e:
             raise IOError(e)
-        self.auth()
-        self.query_id = self.__config['QUERY_ID']
-        self.__data = self.get_query_data(self.query_id)
-        self.col_types, self.col_names = [], []
 
-    def load_json(self, path):
-        with open(path) as file:
-            return json.load(file)
+        self._session = req.Session()
+        self._timeout = (10, 60)  # (connect, read) seconds
 
-    def auth(self):
-        self.__session = req.Session()
-        # get redash login details
-        auth_params = {
-            "email": self.__config['email'],
-            "password": self.__config['password']
-        }
-        request = self.__session.post(
-            self.__config["LOGIN_URL"],
-            data=auth_params
-        )
-        # return auth code for validation later
-        return request.status_code
+        self.query_id: str = str(self._config['QUERY_ID'])
+        self._data = self._get_query_data(self.query_id)
 
-        # switch statement
+    # -------- Fetch Query Data -------- #
 
-    def switch(self, case_var):
-        # logging.error(type(case_var))
-        return {
-            int: "number",
-            float: "number",
-            str: "string",
-            dict: "dict"
-
-        }.get(type(case_var), None)
-
-    def get_query_data(self, query_id):
-
-        # query url
-        url = '{}/{}/results.json'.format(self.__config["QUERY_URL"], query_id)
-
-        # get the response from the redash query in json
-        data_json = None
+    def _get_query_data(self, query_id: str) -> List[Dict[str, Any]]:
+        """Fetch results for the given Redash query as a list of row dicts."""
+        base = self._config['BASE_URL'].rstrip('/')
+        url = f"{base}/api/queries/{query_id}/results.json"
+        params = {'api_key': self._config['API_KEY']}
         try:
-            response = self.__session.get(url, params={'api_key': self.__config["API_KEY"]})
-            # find query data in the json payload
-            data_json = json.loads(response.text)
-        except req.HTTPError:
-            print("Error in getting query results!")
-        if data_json is not None:
-            # amend this code to print schema not a pd.df
-            # load query data into data frame
-            result = data_json['query_result']['data']['rows']
-            # with open("query-data/results_{}.json".format(query_id), 'w') as f:
-            #     f.write(json.dumps(result))
-            # data = pd.DataFrame(data_json["query_result"]["data"]["rows"])
-            # data.fillna('', inplace=True)
-            return result
-        else:
+            resp = self._session.get(url, params=params, timeout=self._timeout)
+            resp.raise_for_status()
+            payload = resp.json()
+        except req.RequestException as e:
+            logger.critical("Error fetching Redash query results: %s", e)
+            raise
+        except ValueError as e:
+            logger.critical("Invalid JSON from Redash results endpoint: %s", e)
+            raise
+
+        try:
+            rows = payload['query_result']['data']['rows']
+            if not isinstance(rows, list):
+                raise TypeError("Redash rows payload is not a list.")
+        except (KeyError, TypeError) as e:
+            logger.critical("Unexpected Redash payload shape: %s", e)
+            raise
+
+        logger.info("Fetched %d rows from Redash query %s.", len(rows), query_id)
+        return rows
+
+    # -------- Schema Inference -------- #
+
+    @staticmethod
+    def _singer_type_for_value(value: Any) -> str:
+        if value is None:
             return None
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, int) or isinstance(value, float):
+            return "number"
+        if isinstance(value, str):
+            return "string"
+        if isinstance(value, dict):
+            return "object"
+        if isinstance(value, list):
+            return "array"
+        return "string"
 
-    def generate_schema(self):
+    def _infer_properties(self, sample_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        MAX_SCAN = min(100, len(sample_rows))
+        union: Dict[str, set] = {}
 
-        def get_properties():
-            result = []
-            for k, v in self.__data[0].items():
-                # logging.error("{} - {}".format(k, v))
-                obj = {k: {"type": ["null", self.switch(v)]}}
-                result.append(obj)
-            return result
+        for i in range(MAX_SCAN):
+            row = sample_rows[i]
+            if not isinstance(row, dict):
+                continue
+            for k, v in row.items():
+                t = self._singer_type_for_value(v)
+                if k not in union:
+                    union[k] = set()
+                if t is not None:
+                    union[k].add(t)
 
-        filename = "tap_redash/{}_properties".format(self.query_id)
-        # create schema
-        schema = {"stream": json.dumps(self.query_id),
-                  "stream_id": json.dumps(self.query_id),
-                  "schema": {"type ": ["null", "object"],
-                             "additionalProperties": False,
-                             "properties": get_properties()},
-                  "key_properties": []
-                  }
-        # data = json.dumps(result)
-        # with open(filename, 'w') as f:
-        #     json.dump(schema, f, separators=(',', ': '), ensure_ascii=False)
+        properties: Dict[str, Any] = {}
+        for field, type_set in union.items():
+            field_types = ["null"] + sorted(list(type_set)) if type_set else ["null", "string"]
+            properties[field] = {"type": field_types}
 
-        return self.__data, schema
+        return properties
 
-    def output_to_stream(self, stream_name, schema):
-        singer.write_schema(stream_name, schema, schema['key_properties'])
-        singer.write_records(stream_name, self.generate_schema()[0])
+    def generate_schema_wrapper(self) -> Dict[str, Any]:
+        if not self._data:
+            properties: Dict[str, Any] = {}
+        else:
+            properties = self._infer_properties(self._data)
 
-    def do_discover(self):
-        """
-        Discovery mode will generate a properties file in a schema JSON format
-        :param query_id:
-        :return: JSON file
-        """
-        print(json.dumps(self.generate_schema()[1], indent=2))
+        key_props = self._config.get("key_properties", [])
+        if not isinstance(key_props, list):
+            key_props = []
 
-    def get_stream(self, schema):
-        selected_stream = []
-        for stream in schema:
-            selected_stream.append(stream['stream_id'])
+        wrapper: Dict[str, Any] = {
+            "stream": self.query_id,
+            "schema": {
+                "type": "object",
+                "properties": properties,
+                "additionalProperties": False,
+            },
+            "key_properties": key_props,
+        }
+        return wrapper
 
-        return selected_stream
+    # -------- Singer IO -------- #
+
+    def do_discover(self) -> Dict[str, Any]:
+        wrapper = self.generate_schema_wrapper()
+        print(json.dumps(wrapper, indent=2))
+        return wrapper
+
+    def output_to_stream(self, stream_name: str, schema_wrapper: Dict[str, Any]) -> None:
+        schema = schema_wrapper["schema"]
+        key_props = schema_wrapper.get("key_properties", [])
+        singer.write_schema(stream_name, schema, key_props)
+
+        for row in self._data:
+            singer.write_records(stream_name, [row])
 
 
-def main():
+def main() -> None:
     rdash = Redash()
 
     if args.discover:
         rdash.do_discover()
-    else:
-        # schema is the passed arg or it needs to be generated if not
-        schema = args.properties if args.properties else rdash.do_discover()
-        rdash.output_to_stream(schema['stream_id'], schema)
-        # data = rdash.generate_schema()[0]
+        return
+
+    schema_wrapper = args.properties if args.properties else rdash.generate_schema_wrapper()
+
+    if not isinstance(schema_wrapper, dict) or "stream" not in schema_wrapper or "schema" not in schema_wrapper:
+        logger.warning("Invalid or missing properties provided; regenerating schema.")
+        schema_wrapper = rdash.generate_schema_wrapper()
+
+    rdash.output_to_stream(schema_wrapper["stream"], schema_wrapper)
 
 
 if __name__ == "__main__":
